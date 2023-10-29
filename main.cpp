@@ -1,135 +1,157 @@
-#include <iostream>
-#include <vector>
-#include <set>
 #include <algorithm>
-#include <sstream>
-
-#define MAX_RESULT_DOCUMENT_COUNT 5
+#include <iostream>
+#include <set>
+#include <string>
+#include <vector>
 
 using namespace std;
 
-string GetLine() {
+#define MAX_RESULT_DOCUMENT_COUNT 5
+
+string ReadLine() {
     string s;
     getline(cin, s);
     return s;
 }
+
 int ReadLineWithNumber() {
     int result = 0;
     cin >> result;
-    GetLine();
+    ReadLine();
     return result;
 }
 
-vector<string> ParseStringToVector(const string &str) {
+vector<string> SplitIntoWords(const string &text) {
     vector<string> words;
     string word;
-    istringstream substr(str);
-    while (substr >> word) {
+    for (const char c: text) {
+        if (c == ' ') {
+            if (!word.empty()) {
+                words.push_back(word);
+                word.clear();
+            }
+        } else {
+            word += c;
+        }
+    }
+    if (!word.empty()) {
         words.push_back(word);
     }
+
     return words;
 }
 
-set<string> ParseStringToSet(const string &str) {
-    set<string> words;
-    string word;
-    istringstream substr(str);
-    while (substr >> word) {
-        words.insert(word);
-    }
-    return words;
+struct Document {
+    int id;
+    int relevance;
+};
+
+bool HasDocumentGreaterRelevance(const Document &lhs, const Document &rhs) {
+    return lhs.relevance > rhs.relevance;
 }
 
-vector<string> SplitIntoWordsNoStop(const string &document, const set<string> &stop_words) {
-    vector<string> words;
-    for (const string &word: ParseStringToVector(document)) {
-        if (stop_words.count(word) == 0) {
-            words.push_back(word);
+class SearchServer {
+public:
+    void SetStopWords(const string &text) {
+        for (const string &word: SplitIntoWords(text)) {
+            stop_words_.insert(word);
         }
     }
-    return words;
-}
 
-set<string> ParseQuery(const string& text, const set<string>& stop_words) {
-    set<string> query_words;
-    for (const string& word : SplitIntoWordsNoStop(text, stop_words)) {
-        query_words.insert(word);
+    void AddDocument(int document_id, const string &document) {
+        const vector<string> words = SplitIntoWordsNoStop(document);
+        documents_.push_back({document_id, words});
     }
-    return query_words;
-}
 
+    vector<Document> FindTopDocuments(const string &raw_query) const {
+        const set<string> query_words = ParseQuery(raw_query);
+        auto matched_documents = FindAllDocuments(query_words);
 
-int MatchDocument(const pair<int, vector<string>>& content, const set<string>& query_words) {
-    if (query_words.empty()) {
-        return 0;
-    }
-    set<string> matched_words;
-    for (const string& word : content.second) {
-        if (matched_words.count(word) != 0) {
-            continue;
+        sort(matched_documents.begin(), matched_documents.end(), HasDocumentGreaterRelevance);
+        if (matched_documents.size() > MAX_RESULT_DOCUMENT_COUNT) {
+            matched_documents.resize(MAX_RESULT_DOCUMENT_COUNT);
         }
-        if (query_words.count(word) != 0) {
-            matched_words.insert(word);
+        return matched_documents;
+    }
+
+private:
+    struct DocumentContent {
+        int id = 0;
+        vector<string> words;
+    };
+
+    vector<DocumentContent> documents_;
+
+    set<string> stop_words_;
+
+    bool IsStopWord(const string &word) const {
+        return stop_words_.count(word) > 0;
+    }
+
+    vector<string> SplitIntoWordsNoStop(const string &text) const {
+        vector<string> words;
+        for (const string &word: SplitIntoWords(text)) {
+            if (!IsStopWord(word)) {
+                words.push_back(word);
+            }
         }
+        return words;
     }
-    return static_cast<int>(matched_words.size());
-}
 
-
-void AddDocument(vector<pair<int, vector<string>>> &documents,
-                 int document_id,
-                 const set<string> &stop_words,
-                 const string &document) {
-    const vector<string> words = SplitIntoWordsNoStop(document, stop_words);
-    documents.push_back({document_id, words});
-}
-
-// Для каждого документа возвращает пару {релевантность, id}
-vector<pair<int, int>> FindAllDocuments(
-        const vector<pair<int, vector<string>>> &documents,
-        const set<string> &query_words) {
-    vector<pair<int, int>> relevance_documents;
-    for (const auto &document: documents) {
-        const int relevance = MatchDocument(document, query_words);
-        if (relevance > 0) {
-            relevance_documents.push_back({relevance, document.first});
+    set<string> ParseQuery(const string &text) const {
+        set<string> query_words;
+        for (const string &word: SplitIntoWordsNoStop(text)) {
+            query_words.insert(word);
         }
-    }
-    return relevance_documents;
-}
-
-// Возвращает самые релевантные документы в виде вектора пар {id, релевантность}
-vector<pair<int, int>> FindTopDocuments(
-        const vector<pair<int, vector<string>>> &documents,
-        const set<string> &stop_words, const string &raw_query) {
-    set<string> query_words = ParseQuery(raw_query, stop_words);
-    vector<pair<int, int>> relevance_documents = FindAllDocuments(documents, query_words);
-
-    sort(relevance_documents.begin(), relevance_documents.end());
-    reverse(relevance_documents.begin(), relevance_documents.end());
-
-    if(relevance_documents.size() > MAX_RESULT_DOCUMENT_COUNT){
-        relevance_documents.resize(MAX_RESULT_DOCUMENT_COUNT);
-    }
-    for (auto& relevance_document : relevance_documents) {
-        swap(relevance_document.first, relevance_document.second);
+        return query_words;
     }
 
-    return relevance_documents;
+    vector<Document> FindAllDocuments(const set<string> &query_words) const {
+        vector<Document> matched_documents;
+        for (const auto &document: documents_) {
+            const int relevance = MatchDocument(document, query_words);
+            if (relevance > 0) {
+                matched_documents.push_back({document.id, relevance});
+            }
+        }
+        return matched_documents;
+    }
+
+    static int MatchDocument(const DocumentContent &content, const set<string> &query_words) {
+        if (query_words.empty()) {
+            return 0;
+        }
+        set<string> matched_words;
+        for (const string &word: content.words) {
+            if (matched_words.count(word) != 0) {
+                continue;
+            }
+            if (query_words.count(word) != 0) {
+                matched_words.insert(word);
+            }
+        }
+        return static_cast<int>(matched_words.size());
+    }
+};
+
+SearchServer CreateSearchServer() {
+    SearchServer search_server;
+    search_server.SetStopWords(ReadLine());
+
+    const int document_count = ReadLineWithNumber();
+    for (int document_id = 0; document_id < document_count; ++document_id) {
+        search_server.AddDocument(document_id, ReadLine());
+    }
+
+    return search_server;
 }
 
 int main() {
-    const string str_stop_word_input = GetLine();
-    const set<string> stop_words = ParseStringToSet(str_stop_word_input);
-    const int document_count = ReadLineWithNumber();
-    vector<pair<int, vector<string>>> documents;
-    for (int document_id = 0; document_id < document_count; ++document_id) {
-        AddDocument(documents, document_id, stop_words, GetLine());
-    }
-    const string raw_query = GetLine();
-    for(auto [document_id, relevance]: FindTopDocuments(documents, stop_words, raw_query)){
-        cout << "{ document_id = " << document_id << ", " << "relevance = " << relevance << " }" << endl;
-    }
+    const SearchServer search_server = CreateSearchServer();
 
-    return 0;
+    const string query = ReadLine();
+    for (const auto &document: search_server.FindTopDocuments(query)) {
+        cout << "{ document_id = "s << document.id << ", "
+             << "relevance = "s << document.relevance << " }"s << endl;
+    }
 }
