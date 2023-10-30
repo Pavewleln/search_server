@@ -3,6 +3,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <sstream>
 
 using namespace std;
 
@@ -24,18 +25,11 @@ int ReadLineWithNumber() {
 vector<string> SplitIntoWords(const string &text) {
     vector<string> words;
     string word;
-    for (const char c: text) {
-        if (c == ' ') {
-            if (!word.empty()) {
-                words.push_back(word);
-                word.clear();
-            }
-        } else {
-            word += c;
+    istringstream query_word(text);
+    while (query_word >> word) {
+        if (!word.empty()) {
+            words.push_back(word);
         }
-    }
-    if (!word.empty()) {
-        words.push_back(word);
     }
 
     return words;
@@ -45,10 +39,6 @@ struct Document {
     int id;
     int relevance;
 };
-
-bool HasDocumentGreaterRelevance(const Document &lhs, const Document &rhs) {
-    return lhs.relevance > rhs.relevance;
-}
 
 class SearchServer {
 public:
@@ -64,10 +54,11 @@ public:
     }
 
     vector<Document> FindTopDocuments(const string &raw_query) const {
-        const set<string> query_words = ParseQuery(raw_query);
+        const Query query_words = ParseQuery(raw_query);
         auto matched_documents = FindAllDocuments(query_words);
 
-        sort(matched_documents.begin(), matched_documents.end(), HasDocumentGreaterRelevance);
+        sort(matched_documents.begin(), matched_documents.end(),
+             [](const Document &lhs, const Document &rhs) { return lhs.relevance > rhs.relevance; });
         if (matched_documents.size() > MAX_RESULT_DOCUMENT_COUNT) {
             matched_documents.resize(MAX_RESULT_DOCUMENT_COUNT);
         }
@@ -78,6 +69,11 @@ private:
     struct DocumentContent {
         int id = 0;
         vector<string> words;
+    };
+
+    struct Query {
+        set<string> plus_words;
+        set<string> minus_words;
     };
 
     vector<DocumentContent> documents_;
@@ -98,15 +94,21 @@ private:
         return words;
     }
 
-    set<string> ParseQuery(const string &text) const {
-        set<string> query_words;
-        for (const string &word: SplitIntoWordsNoStop(text)) {
-            query_words.insert(word);
+    Query ParseQuery(const string &text) const {
+        Query query_words;
+        for (const string &word: SplitIntoWords(text)) {
+            if (!IsStopWord(word[0] == '-' ? word.substr(1) : word)) {
+                if (word[0] == '-') {
+                    query_words.minus_words.insert(word.substr(1));
+                } else {
+                    query_words.plus_words.insert(word);
+                }
+            }
         }
         return query_words;
     }
 
-    vector<Document> FindAllDocuments(const set<string> &query_words) const {
+    vector<Document> FindAllDocuments(const Query &query_words) const {
         vector<Document> matched_documents;
         for (const auto &document: documents_) {
             const int relevance = MatchDocument(document, query_words);
@@ -117,16 +119,19 @@ private:
         return matched_documents;
     }
 
-    static int MatchDocument(const DocumentContent &content, const set<string> &query_words) {
-        if (query_words.empty()) {
+    static int MatchDocument(const DocumentContent &content, const Query &query_words) {
+        if (query_words.plus_words.empty()) {
             return 0;
         }
         set<string> matched_words;
         for (const string &word: content.words) {
+            if(query_words.minus_words.count(word) != 0){
+                return 0;
+            }
             if (matched_words.count(word) != 0) {
                 continue;
             }
-            if (query_words.count(word) != 0) {
+            if (query_words.plus_words.count(word) != 0) {
                 matched_words.insert(word);
             }
         }
@@ -137,12 +142,10 @@ private:
 SearchServer CreateSearchServer() {
     SearchServer search_server;
     search_server.SetStopWords(ReadLine());
-
     const int document_count = ReadLineWithNumber();
     for (int document_id = 0; document_id < document_count; ++document_id) {
         search_server.AddDocument(document_id, ReadLine());
     }
-
     return search_server;
 }
 
