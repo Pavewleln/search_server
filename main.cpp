@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 #include <sstream>
+#include <map>
+#include <cmath>
 
 using namespace std;
 
@@ -37,7 +39,7 @@ vector<string> SplitIntoWords(const string &text) {
 
 struct Document {
     int id;
-    int relevance;
+    double relevance;
 };
 
 class SearchServer {
@@ -49,8 +51,12 @@ public:
     }
 
     void AddDocument(int document_id, const string &document) {
+        ++document_count_;
         const vector<string> words = SplitIntoWordsNoStop(document);
-        documents_.push_back({document_id, words});
+        double TF = 1.0 / words.size();
+        for (const string &word: words) {
+            word_to_documents_[word][document_id] += TF;
+        }
     }
 
     vector<Document> FindTopDocuments(const string &raw_query) const {
@@ -76,7 +82,9 @@ private:
         set<string> minus_words;
     };
 
-    vector<DocumentContent> documents_;
+    int document_count_ = 0;
+
+    map<string, map<int, double>> word_to_documents_;
 
     set<string> stop_words_;
 
@@ -109,12 +117,26 @@ private:
     }
 
     vector<Document> FindAllDocuments(const Query &query_words) const {
-        vector<Document> matched_documents;
-        for (const auto &document: documents_) {
-            const int relevance = MatchDocument(document, query_words);
-            if (relevance > 0) {
-                matched_documents.push_back({document.id, relevance});
+        map<int, double> document_to_relevance;
+        for (const auto &word: query_words.plus_words) {
+            if (word_to_documents_.count(word) == 0) {
+                continue;
             }
+            for (const auto [document_id, temp]: word_to_documents_.at(word)) {
+                document_to_relevance[document_id] += temp * log(document_count_ * 1.0 / word_to_documents_.at(word).size());
+            }
+        }
+        for (const auto &word: query_words.minus_words) {
+            if (word_to_documents_.count(word) == 0) {
+                continue;
+            }
+            for (const auto &[document_id, _]: word_to_documents_.at(word)) {
+                document_to_relevance.erase(document_id);
+            }
+        }
+        vector<Document> matched_documents;
+        for (const auto [document_id, relevance]: document_to_relevance) {
+            matched_documents.push_back({document_id, relevance});
         }
         return matched_documents;
     }
@@ -125,7 +147,7 @@ private:
         }
         set<string> matched_words;
         for (const string &word: content.words) {
-            if(query_words.minus_words.count(word) != 0){
+            if (query_words.minus_words.count(word) != 0) {
                 return 0;
             }
             if (matched_words.count(word) != 0) {
@@ -135,7 +157,7 @@ private:
                 matched_words.insert(word);
             }
         }
-        return static_cast<int>(matched_words.size());
+        return (int) matched_words.size();
     }
 };
 
