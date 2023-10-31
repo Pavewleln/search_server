@@ -40,6 +40,7 @@ vector<string> SplitIntoWords(const string &text) {
 struct Document {
     int id;
     double relevance;
+    int rating;
 };
 
 class SearchServer {
@@ -50,8 +51,9 @@ public:
         }
     }
 
-    void AddDocument(int document_id, const string &document) {
+    void AddDocument(int document_id, const string &document, const vector<int> &ratings) {
         ++document_count_;
+        document_rating_[document_id] = ComputeAverageRating(ratings);
         const vector<string> words = SplitIntoWordsNoStop(document);
         double TF = 1.0 / words.size();
         for (const string &word: words) {
@@ -82,11 +84,23 @@ private:
         set<string> minus_words;
     };
 
+    map<int, int> document_rating_;
     int document_count_ = 0;
 
     map<string, map<int, double>> word_to_documents_;
 
     set<string> stop_words_;
+
+    int ComputeAverageRating(const vector<int> &rating) {
+        if (rating.empty()) {
+            return 0;
+        }
+        int middle_rating = 0;
+        for (const int rate: rating) {
+            middle_rating += rate;
+        }
+        return middle_rating / (int) rating.size();
+    }
 
     bool IsStopWord(const string &word) const {
         return stop_words_.count(word) > 0;
@@ -123,7 +137,8 @@ private:
                 continue;
             }
             for (const auto [document_id, temp]: word_to_documents_.at(word)) {
-                document_to_relevance[document_id] += temp * log(document_count_ * 1.0 / word_to_documents_.at(word).size());
+                document_to_relevance[document_id] +=
+                        temp * log(document_count_ * 1.0 / word_to_documents_.at(word).size());
             }
         }
         for (const auto &word: query_words.minus_words) {
@@ -136,7 +151,7 @@ private:
         }
         vector<Document> matched_documents;
         for (const auto [document_id, relevance]: document_to_relevance) {
-            matched_documents.push_back({document_id, relevance});
+            matched_documents.push_back({document_id, relevance, document_rating_.at(document_id)});
         }
         return matched_documents;
     }
@@ -166,7 +181,15 @@ SearchServer CreateSearchServer() {
     search_server.SetStopWords(ReadLine());
     const int document_count = ReadLineWithNumber();
     for (int document_id = 0; document_id < document_count; ++document_id) {
-        search_server.AddDocument(document_id, ReadLine());
+        const string document = ReadLine();
+        int rating_size = 0;
+        cin >> rating_size;
+        vector<int> ratings(rating_size, 0);
+        for (int &rating: ratings) {
+            cin >> rating;
+        }
+        search_server.AddDocument(document_id, document, ratings);
+        ReadLine();
     }
     return search_server;
 }
@@ -176,7 +199,10 @@ int main() {
 
     const string query = ReadLine();
     for (const auto &document: search_server.FindTopDocuments(query)) {
-        cout << "{ document_id = "s << document.id << ", "
-             << "relevance = "s << document.relevance << " }"s << endl;
+        cout << "{ "
+             << "document_id = " << document.id << ", "
+             << "relevance = " << document.relevance << ", "
+             << "rating = " << document.rating
+             << " }" << endl;
     }
 }
